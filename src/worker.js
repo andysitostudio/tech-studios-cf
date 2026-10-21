@@ -40,7 +40,7 @@ const GB = 1024 ** 3;
 const guessLabel = h => /backblazeb2/.test(h) ? "Backblaze B2" : /filebase/.test(h) ? "Filebase" : h;
 const guessQuota = h => /filebase/.test(h) ? 5 : 10;
 function readStores() {
-  const e = ENV, out = [];
+  const e = Object.fromEntries(Object.entries(ENV).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])), out = [];
   for (const [id, p] of [["s3", "S3_"], ["s3b", "S3B_"]]) {
     if (!(e[p + "ENDPOINT"] && e[p + "KEY_ID"] && e[p + "SECRET"] && e[p + "BUCKET"])) continue;
     const host = e[p + "ENDPOINT"].replace(/^https?:\/\//, "").replace(/\/.*$/, "");
@@ -358,7 +358,7 @@ async function handle(req) {
       if (m === "POST" && a === "refresh") return J(mint());
       if (m === "GET" && a === "catalog") {
         const [cat, stats] = await Promise.all([rd("catalog", []), rd("stats", {})]);
-        return J({ apps: cat.map(x => decorate(x, stats, true)), status: pubStatus(st, true), upload: r2ok(), stores: storeInfo(cat) });
+        return J({ apps: cat.map(x => decorate(x, stats, true)), status: pubStatus(st, true), upload: r2ok(), missing: r2ok() ? [] : ["S3_ENDPOINT", "S3_KEY_ID", "S3_SECRET", "S3_BUCKET"].filter(k => !ENV[k]), stores: storeInfo(cat) });
       }
       if (m === "PUT" && a === "app") {
         const f = frozen(); if (f) return f;
@@ -374,6 +374,26 @@ async function handle(req) {
       }
       const am = a.match(/^media\/([0-9a-f-]{36})$/i);
       if (m === "GET" && am) { const x = (await rd("catalog", [])).find(y => y.id === am[1]); return x ? J(mediaView(x)) : J({ error: "notfound" }, 404); }
+      if (m === "GET" && a === "storage-check") {
+        const names = Object.keys(ENV).filter(k => !["DB", "ASSETS"].includes(k));
+        const out = [];
+        for (const [id, p, label] of [["s3", "S3_", "Almacenamiento principal (S3_…)"], ["s3b", "S3B_", "Almacenamiento secundario (S3B_…)"]]) {
+          const need = ["ENDPOINT", "KEY_ID", "SECRET", "BUCKET"], have = need.filter(k => String(ENV[p + k] || "").trim());
+          const entry = { id, label, missing: need.filter(k => !have.includes(k)).map(k => p + k), found: have.map(k => p + k) };
+          const st = stores().find(x => x.id === id);
+          if (st) {
+            entry.host = st.host; entry.bucket = st.bucket; entry.region = st.region;
+            try {
+              const x = await fetch(r2url("HEAD", "files/__diagnostico__/x", 60, {}, id), { method: "HEAD" });
+              entry.status = x.status;
+              entry.hint = x.status === 404 ? "OK: las claves y el bucket funcionan." : x.status === 403 ? "Las claves no tienen permiso o están mal copiadas (keyID o applicationKey), o la clave no es de este bucket." : x.status === 400 ? "Revisa el endpoint y el nombre del bucket: Backblaze no los reconoce." : x.status === 301 || x.status === 307 ? "El endpoint no corresponde a la región del bucket." : "Respuesta inesperada del almacenamiento.";
+            } catch { entry.status = 0; entry.hint = "No se pudo conectar. Revisa que S3_ENDPOINT sea solo el dominio, sin https:// y sin espacios."; }
+          } else if (have.length) entry.hint = "Faltan variables: " + entry.missing.join(", ") + ".";
+          else entry.hint = "No hay ninguna variable de este grupo.";
+          out.push(entry);
+        }
+        return J({ upload: r2ok(), stores: out, seen: names.filter(k => /s3|b2|bucket|key|secret|endpoint|session/i.test(k)).sort() });
+      }
       if (m === "GET" && a === "backup") return J({ v: 1, at: Date.now(), catalog: await rd("catalog", []), stats: await rd("stats", {}), posts: await rd("posts", []), settings: await getSettings(), quiz: await rd("quiz", null), quiz_resp: await rd("quiz_resp", []) });
       if (m === "POST" && a === "restore") {
         const f = frozen(); if (f) return f;

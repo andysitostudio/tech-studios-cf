@@ -44,7 +44,7 @@ const safeUrl=u=>/^https?:\/\//i.test(u||"")?u:"";
 Object.assign(IC,{clip:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',check:'<path d="M20 6L9 17l-5-5"/>',mail:'<path d="M3 5h18v14H3z"/><path d="M3 7l9 6 9-6"/>',bulb:'<path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/>',share:'<path d="M12 3v12M8 7l4-4 4 4M5 11v9h14v-9"/>',addhome:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/>',play:'<path d="M8 5v14l11-7z"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.7-2.5 2-2.5 3.5M12 17h.01"/>',coffee:'<path d="M3 8h13v6a5 5 0 01-5 5H8a5 5 0 01-5-5V8zM16 9h2a3 3 0 010 6h-2"/>',megaphone:'<path d="M3 11v2a1 1 0 001 1h2l6 4V6L6 10H4a1 1 0 00-1 1zM16 8a5 5 0 010 8M19 5a9 9 0 010 14"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',pin:'<path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',plus:'<path d="M12 5v14M5 12h14"/>',heart:'<path d="M20.8 5.6a5.5 5.5 0 00-7.8 0L12 6.6l-1-1a5.5 5.5 0 10-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 000-7.8z"/>',flame:'<path d="M12 2c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .5 2 1.5 2.5 2 2 0-3-1-5 1-8z"/>'});
 
 /* ---------- Estado y API (todo vive en el servidor) ---------- */
-let apps=[],status={mode:"off",blocked:[],msg:"",frozen:false},admin=false,editId=null,iconData="",loaded=false,loadErr=false,seen=new Set(),lastRef=0,sel={},canUpload=false,fl={},ups={},stores=[];
+let apps=[],status={mode:"off",blocked:[],msg:"",frozen:false},admin=false,editId=null,iconData="",loaded=false,loadErr=false,seen=new Set(),lastRef=0,sel={},canUpload=false,fl={},ups={},stores=[],upMissing=[];
 const SK="ts_tok";
 const tok=()=>{try{const o=JSON.parse(sessionStorage.getItem(SK));return o&&o.exp>Date.now()?o.t:null}catch(e){return null}};
 const setTok=j=>sessionStorage.setItem(SK,JSON.stringify({t:j.token,exp:j.exp}));
@@ -61,7 +61,7 @@ async function api(path,o={}){
     if(r.status===401&&t&&o.auth!==false)logout(true);
     return{ok:r.ok,s:r.status,j}}catch(e){return{ok:false,s:0,j:{}}}}
 let lastLoadT=0;
-async function load(){lastLoadT=Date.now();const r=await api(admin?"/admin/catalog":"/catalog");if(r.ok){apps=r.j.apps||[];status=r.j.status||status;canUpload=!!r.j.upload;stores=r.j.stores||[];loaded=true;loadErr=false;return true}loadErr=!loaded;return false}
+async function load(){lastLoadT=Date.now();const r=await api(admin?"/admin/catalog":"/catalog");if(r.ok){apps=r.j.apps||[];status=r.j.status||status;canUpload=!!r.j.upload;stores=r.j.stores||[];upMissing=r.j.missing||[];loaded=true;loadErr=false;return true}loadErr=!loaded;return false}
 const sigOf=()=>JSON.stringify([apps.map(a=>[a.id,a.dl,a.dw,a.dm,a.q,a.updated]),status]);
 async function logout(expired){sessionStorage.removeItem(SK);admin=false;gaFlag();if(expired)toast("Sesión expirada.");await load();ui()}
 const touch=()=>{if(!admin||Date.now()-lastRef<120000)return;lastRef=Date.now();api("/admin/refresh",{method:"POST"}).then(r=>{if(r.ok)setTok(r.j)})};
@@ -181,7 +181,7 @@ function buildZones(a){
     const chip=document.createElement("button");chip.type="button";chip.className="sec chip"+(sel[k]?" on":"");chip.innerHTML=lg(k,22)+"<span>"+PL[k][0]+"</span>";$("chips").appendChild(chip);
     const w=document.createElement("div");w.className="zone"+(sel[k]?"":" hide");
     w.innerHTML=`<div class="zh">${lg(k,46)}<div><b>${PL[k][0]}</b><div class="hint">Formatos: ${PL[k][2]}</div></div></div>
-    <label>Archivo — arrástralo aquí</label><div class="dz${old?" has":""}"><div class="t">${canUpload?"Arrastra el archivo aquí o haz clic":"Subida de archivos no configurada: usa un enlace"}</div><div class="i">${old?esc(old.name)+" · "+fmt(old.size):""}</div><div class="pb"><i style="width:${old?100:0}%"></i></div><button type="button" class="sec x ${old?"":"hide"}">Quitar</button></div>
+    <label>Archivo — arrástralo aquí</label><div class="dz${old?" has":""}"><div class="t">${canUpload?"Arrastra el archivo aquí o haz clic":"Subida de archivos no configurada"+(upMissing.length?" — al servidor le falta: "+upMissing.join(", "):"")+". Usa un enlace mientras tanto."}</div><div class="i">${old?esc(old.name)+" · "+fmt(old.size):""}</div><div class="pb"><i style="width:${old?100:0}%"></i></div><button type="button" class="sec x ${old?"":"hide"}">Quitar</button></div>
     <label>…o pega un enlace https (opcional si subes archivo)</label><input id="u_${k}" type="url" placeholder="https://…" value="${esc(a&&a.urls&&a.urls[k]||"")}">`;
     $("zones").appendChild(w);
     const dz=w.querySelector(".dz"),info=dz.querySelector(".i"),bar=dz.querySelector(".pb i"),x=dz.querySelector(".x");
@@ -241,6 +241,21 @@ function resetMedia(a){
   }
   syncTr();
 }
+$("diagBtn").onclick=async()=>{
+  const o=$("diagOut");o.classList.remove("hide");o.textContent="Revisando…";
+  const r=await api("/admin/storage-check");if(!r.ok){o.textContent="No se pudo hacer el diagnóstico (¿sesión vencida?).";return}
+  const L=[r.j.upload?"Estado: la subida de archivos ESTÁ configurada.":"Estado: la subida de archivos NO está configurada."];
+  for(const s of r.j.stores){
+    L.push("","• "+s.label);
+    if(s.found.length)L.push("  Variables encontradas: "+s.found.join(", "));
+    if(s.missing.length&&s.found.length)L.push("  Faltan: "+s.missing.join(", "));
+    if(s.host)L.push("  Servidor: "+s.host+" · bucket: "+s.bucket+" · región: "+s.region);
+    L.push("  "+(s.status!=null?"Prueba de conexión: "+(s.status||"sin respuesta")+" → ":"")+s.hint);
+  }
+  L.push("","Variables relacionadas que ve el servidor: "+(r.j.seen.length?r.j.seen.join(", "):"ninguna"));
+  if(!r.j.upload)L.push("","Si no aparece S3_ENDPOINT, S3_KEY_ID, S3_SECRET y S3_BUCKET en la lista de arriba, no se guardaron en ESTE Worker o falta pulsar Deploy. Revisa que los nombres estén en mayúsculas y escritos igual.");
+  o.textContent=L.join("\n");
+};
 $("bUp").onclick=()=>openForm();
 function openForm(a){
   if(!canEdit())return;

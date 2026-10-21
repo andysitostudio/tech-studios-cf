@@ -1,0 +1,19 @@
+{
+  "name": "tech-studios",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "techstudios-db",
+      "database_id": "53b5a574-e8ed-4da4-a996-f2ed2fed664a"
+    }
+  ],
+  "observability": { "enabled": true }
+}

@@ -241,13 +241,35 @@ function resetMedia(a){
   }
   syncTr();
 }
+async function fillStore(){
+  const r=await api("/admin/storage-check"),s=r.ok?(r.j.stores.find(x=>x.id===$("scId").value)||{}):{};
+  $("scEp").value=s.host||"";$("scBk").value=s.bucket||"";$("scKi").value="";$("scSe").value="";$("scErr").textContent="";
+  $("scKi").placeholder=s.keyPreview?"Ya hay una guardada (empieza con "+s.keyPreview+")":"";
+}
+$("cfgBtn").onclick=async()=>{await fillStore();dStore.showModal()};
+$("scId").onchange=fillStore;
+$("fStore").onsubmit=async e=>{
+  e.preventDefault();if(!canEdit())return;
+  const b={id:$("scId").value,endpoint:$("scEp").value,bucket:$("scBk").value,keyId:$("scKi").value,secret:$("scSe").value};
+  if(!b.endpoint.trim()||!b.bucket.trim()){$("scErr").textContent="Completa el endpoint y el nombre del bucket.";return}
+  const pin=await askPin("Guardar almacenamiento — ingresa tu PIN");if(!pin)return;
+  const r=await api("/admin/storage-config",{method:"PUT",pin,body:b});
+  if(!r.ok){if(r.s===400){$("scErr").textContent=r.j.error;return}return pinErr(r)}
+  $("scSe").value="";dStore.close();await load();toast("Almacenamiento guardado. Cierra y vuelve a abrir este formulario.");$("diagBtn").click();
+};
+$("scClear").onclick=async()=>{
+  if(!canEdit()||!confirm("¿Quitar este almacenamiento del sitio? Los archivos ya subidos dejarán de poder descargarse hasta que lo vuelvas a configurar."))return;
+  const pin=await askPin("Quitar almacenamiento — ingresa tu PIN");if(!pin)return;
+  const r=await api("/admin/storage-config",{method:"PUT",pin,body:{id:$("scId").value,clear:true}});
+  if(!r.ok)return pinErr(r);dStore.close();await load();toast("Almacenamiento quitado.");
+};
 $("diagBtn").onclick=async()=>{
   const o=$("diagOut");o.classList.remove("hide");o.textContent="Revisando…";
   const r=await api("/admin/storage-check");if(!r.ok){o.textContent="No se pudo hacer el diagnóstico (¿sesión vencida?).";return}
   const L=[r.j.upload?"Estado: la subida de archivos ESTÁ configurada.":"Estado: la subida de archivos NO está configurada."];
   for(const s of r.j.stores){
     L.push("","• "+s.label);
-    if(s.found.length)L.push("  Variables encontradas: "+s.found.join(", "));
+    if(s.found.length)L.push("  Datos encontrados: "+s.found.join(", "));
     if(s.missing.length&&s.found.length)L.push("  Faltan: "+s.missing.join(", "));
     if(s.host)L.push("  Servidor: "+s.host+" · bucket: "+s.bucket+" · región: "+s.region);
     L.push("  "+(s.status!=null?"Prueba de conexión: "+(s.status||"sin respuesta")+" → ":"")+s.hint);
@@ -350,28 +372,66 @@ document.addEventListener("click",e=>{
 });
 
 /* ---------- Tutorial de bienvenida ---------- */
-const TOUR=[
- ["download","Bienvenido a Tech Studios","Aquí encuentras apps, juegos y mods para tus dispositivos. En menos de un minuto te muestro cómo usar el sitio."],
- ["search","Busca y ordena","Usa el buscador (atajo: la tecla /) y los filtros de categoría y plataforma. Ordena por más nuevas, más populares o por tendencia de la semana y del mes."],
- ["box","Lee cada tarjeta","Cada app muestra su versión, descripción, los logos de las plataformas disponibles y su número de descargas, con cuánto subió esta semana y este mes."],
- ["download","Descarga con un clic","Pulsa el botón de tu plataforma. En iOS las apps son PWA: ábrela en Safari, pulsa Compartir y elige «Añadir a pantalla de inicio». En Android, el sistema puede pedirte permiso para instalar desde tu navegador. En Windows, si aparece SmartScreen, verifica el nombre del editor."],
- ["clock","Próximos estrenos","Las apps con la etiqueta «Próximamente» tienen cuenta regresiva y se activan solas cuando llega su hora. Elige «Próximos estrenos» en el orden para verlas todas."],
- ["megaphone","Novedades","En la pestaña Novedades publico comunicados, avisos y devlogs. Los spoilers salen borrosos: pulsa «Mostrar spoiler» solo si quieres verlos."],
- ["coffee","Cómprame un café","Si te gusta mi trabajo, puedes apoyarme con una donación voluntaria por PayPal desde la pestaña Cómprame un café. ¡Gracias!"],
- ["help","¿Necesitas ayuda?","Puedes volver a ver este tutorial con el botón «Ayuda» de arriba. Abajo encontrarás los documentos legales y tus preferencias de cookies. ¡Disfruta el sitio!"]
-];
 const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
-TOUR.splice(IOS?1:4,0,["share",IOS?"Instala en tu iPhone o iPad":"Si usas iPhone o iPad","En iPhone y iPad las apps se instalan como PWA: se ven y funcionan como una app normal, sin pasar por la App Store.",
- `<ol class="ios"><li>Abre este sitio en <b>Safari</b>.</li><li>Toca el botón <b>Compartir</b> ${ic("share",18)} (en iPhone está abajo; en iPad, arriba a la derecha).</li><li>Desliza el menú y elige <b>Añadir a pantalla de inicio</b> ${ic("addhome",18)}.</li><li>Toca <b>Añadir</b>. Verás el icono en tu pantalla de inicio y se abrirá a pantalla completa, como una app.</li></ol><div class="tip">Los archivos .apk y .exe no funcionan en iOS: usa los botones <b>Abrir PWA</b> de cada app. Si no ves «Añadir a pantalla de inicio», confirma que estás en Safari y no dentro de otra app (Instagram, Facebook…).</div>`,"ios"]);
+const OSN=IOS?"ios":/Android/.test(navigator.userAgent)?"android":/Windows/.test(navigator.userAgent)?"win":/Mac OS X|Macintosh/.test(navigator.userAgent)?"mac":/Linux/.test(navigator.userAgent)?"lin":"";
+const UL=a=>`<ul class="tl">${a.map(x=>`<li>${x}</li>`).join("")}</ul>`;
+const OL=a=>`<ol class="ios">${a.map(x=>`<li>${x}</li>`).join("")}</ol>`;
+const TIP=t=>`<div class="tip">${t}</div>`;
+const DET=(os,t,h)=>`<details${OSN===os?" open":""}><summary>${t}</summary><div class="dbody">${h}</div></details>`;
+const K=t=>`<span class="kbd">${t}</span>`;
+const TOUR=[
+ ["download","Bienvenido a Tech Studios","Aquí encuentras apps, juegos y mods para tus dispositivos. Esta guía explica todo el sitio con calma. Puedes saltar a cualquier tema con el menú «Ir a…» de arriba.",
+  UL(["<b>Descargas:</b> el catálogo. Aquí buscas, ves los detalles y descargas.","<b>Novedades:</b> comunicados, avisos, devlogs y spoilers.","<b>Sugerencias:</b> reporta un error, propone una mejora o una idea de qué crear. El sitio te prepara el correo.","<b>Cuestionario:</b> preguntas cortas para ayudar a decidir qué crear.","<b>Cómprame un café:</b> apoyo voluntario por PayPal.","Arriba a la derecha tienes <b>Ayuda</b> (esta guía) y el botón de estilo visual (Neón o Liquid Glass)."])],
+ ["search","Buscar, filtrar y ordenar","Todo esto está arriba del catálogo, en la pestaña Descargas.",
+  UL(["<b>Buscador:</b> escribe parte del nombre de la app o de su saga. Atajo en computador: la tecla "+K("/")+".","<b>Categoría:</b> Juegos (Acción, Aventura, Estrategia…) o Aplicaciones (Herramientas, Música, Educación…).","<b>Plataforma:</b> Windows 11, macOS, Linux, Android, iOS (PWA), Web, LG TV, Samsung TV, Android TV, VR, Minecraft…","<b>Orden:</b> más nuevas, más antiguas, más populares, menos populares, tendencia de la semana, tendencia del mes y próximos estrenos.","Puedes combinar todo. Si no aparece nada, quita algún filtro."])+TIP("La «tendencia» cuenta las descargas de los últimos 7 o 30 días: sirve para ver qué está de moda ahora.")],
+ ["box","Cómo leer una tarjeta","Cada app del catálogo es una tarjeta con esta información:",
+  UL(["<b>Portada e icono.</b> Un círculo con un triángulo de play sobre la portada indica que tiene tráiler.","<b>Nombre, saga y versión</b> (por ejemplo v1.2).","<b>Etiquetas:</b> la categoría, las plataformas con su logo y «Próximamente» si aún no sale.","<b>Descargas:</b> el total arriba a la derecha y, abajo, cuánto subió esta semana y este mes.","<b>Botones de descarga:</b> uno por plataforma, con el tamaño del archivo cuando se conoce, y los logos de las plataformas al final."])],
+ ["eye","Ver el detalle: galería y tráiler","Haz clic (o toca) una tarjeta, fuera de los botones, para abrir su ventana de detalle.",
+  OL(["Verás la descripción completa, las novedades de la versión y los botones de descarga.","Si la app tiene imágenes, pásalas con las flechas ‹ › o con las miniaturas de abajo. En computador también sirven las teclas "+K("←")+" y "+K("→")+".","Si tiene tráiler de YouTube, pulsa <b>Ver tráiler</b>. Hasta ese momento el sitio no se conecta con YouTube. Si es un video propio, usa los controles del reproductor.","Para cerrar, pulsa <b>Cerrar</b> o la tecla "+K("Esc")+"."])],
+ ["download","Descargar paso a paso","Es muy simple:",
+  OL(["Elige el botón de <b>tu</b> plataforma (tiene su logo). Si una app existe para varias, verás un botón por cada una.","Mira el tamaño que aparece en el botón. Si es grande, mejor usa Wi-Fi.","Pulsa el botón. La descarga empieza sola: el sitio cuenta la descarga y te lleva al archivo.","Busca el archivo en la carpeta <b>Descargas</b> de tu dispositivo (en el navegador de un computador, "+K("Ctrl")+" + "+K("J")+" abre la lista de descargas). Luego sigue la guía de instalación del siguiente paso."])+
+  `<h4 class="th">Si el botón no te deja descargar</h4>`+UL(["<b>Candado o «bloqueada»:</b> las descargas están detenidas por seguridad por un rato. Vuelve más tarde.","<b>Reloj o «Disponible el…»:</b> la app aún no se estrena.","<b>«Próximamente» en una plataforma:</b> esa versión todavía no está lista.","<b>«Abrir PWA» o «Abrir»:</b> no descarga un archivo; se abre en el navegador."])+TIP("Descarga siempre desde los botones de este sitio. Los archivos de otras páginas pueden no ser seguros.")],
+ ["box","Instalar según tu dispositivo","Abre el tuyo (ya dejé abierto el que parece corresponder a tu equipo). Los programas nuevos suelen mostrar advertencias del sistema: es normal.",
+  DET("win","Windows 11 (.exe, .msi, .msix, .zip)",UL(["Doble clic en el archivo. Si es un <b>.zip</b>: clic derecho, <b>Extraer todo</b>, y abre el programa dentro de la carpeta.","Si aparece una pantalla azul de <b>SmartScreen</b>: pulsa <b>Más información</b> y luego <b>Ejecutar de todas formas</b>, solo si descargaste el archivo desde este sitio.","Windows puede pedir permiso de administrador para instalar. Acepta solo si tú iniciaste la instalación."]))+
+  DET("mac","macOS (.dmg, .pkg, .zip)",UL(["<b>.dmg:</b> ábrelo y arrastra la app a la carpeta <b>Aplicaciones</b>. <b>.pkg:</b> doble clic y sigue el asistente.","Si dice que no se puede abrir por ser de un desarrollador no identificado: clic derecho (o Control + clic) sobre la app, <b>Abrir</b> y otra vez <b>Abrir</b>."]))+
+  DET("lin","Linux (.AppImage, .deb, .rpm, .tar.gz)",UL(["<b>.AppImage:</b> clic derecho, <b>Propiedades</b>, <b>Permisos</b>, marca «Permitir ejecutar» y haz doble clic.","<b>.deb</b> (Ubuntu, Debian): doble clic, o en la terminal <code>sudo apt install ./archivo.deb</code>.","<b>.rpm</b> (Fedora): <code>sudo dnf install ./archivo.rpm</code>.","<b>.tar.gz:</b> extráelo y ejecuta el programa que trae dentro."]))+
+  DET("android","Android (.apk, .zip)",UL(["Toca el archivo descargado (o ábrelo desde la app <b>Archivos</b> o <b>Descargas</b>).","Android puede pedirte permitir «instalar apps desconocidas» para tu navegador o para Archivos. Actívalo, instala y luego vuelve a desactivarlo.","Si es un <b>.zip</b>, extráelo primero. Un archivo <b>.aab</b> no se instala directamente: busca el <b>.apk</b>."]))+
+  DET("ios","iPhone y iPad (PWA)",UL(["Abre el sitio en <b>Safari</b>, toca <b>Compartir</b> "+ic("share",16)+", elige <b>Añadir a pantalla de inicio</b> "+ic("addhome",16)+" y toca <b>Añadir</b>.","Los archivos .apk y .exe no funcionan en iOS. Hay un paso con más detalle justo después."]))+
+  DET("web","Web / HTML5 (botón «Abrir»)",UL(["Se abre en una pestaña del navegador y no se instala nada.","Para usarla como app: en Chrome o Edge, menú y <b>Instalar</b>; en el celular, <b>Añadir a pantalla de inicio</b>."]))+
+  DET("tv","Smart TV y realidad virtual (LG, Samsung, Android TV, Meta Quest)",UL(["<b>LG TV (.ipk):</b> requiere activar el modo desarrollador y las herramientas de LG para webOS.","<b>Samsung TV (.wgt):</b> requiere modo desarrollador y Tizen Studio.","<b>Android TV (.apk):</b> instálalo con un explorador de archivos (por ejemplo la app «Downloader») o por USB.","<b>Meta Quest (.apk):</b> activa el modo desarrollador y usa SideQuest o Meta Quest Developer Hub.","Son pasos técnicos: sigue la guía oficial de tu dispositivo."]))+
+  DET("mc","Minecraft: mods, plugins y add-ons",UL(["<b>Mods de Java (.jar):</b> instala primero el cargador que indique la app (Forge, Fabric o NeoForge) para <b>la misma versión</b> del juego. Copia el .jar a la carpeta <b>mods</b>: en Windows, pulsa "+K("Win")+" + "+K("R")+", escribe <code>%appdata%\\.minecraft</code> y abre (o crea) la carpeta mods.","<b>Plugins (.jar):</b> son para servidores Spigot, Paper o Bukkit. Copia el .jar a la carpeta <b>plugins</b> del servidor y reinícialo. Solo quien administra el servidor puede hacerlo.","<b>Add-ons de Bedrock (.mcaddon, .mcpack, .mcworld):</b> ábrelo con Minecraft (doble clic en Windows; en el celular, desde Archivos). Se importa solo; luego actívalo en los ajustes de tu mundo."])+TIP("Antes de instalar mods, haz una copia de tus mundos."))],
+ ["clock","Próximos estrenos","Algunas apps se anuncian antes de salir:",
+  UL(["Llevan la etiqueta <b>Próximamente</b> y una <b>cuenta regresiva</b> en días, horas, minutos y segundos.","El botón dice «Disponible el…» y no se puede pulsar hasta ese momento.","Cuando llega la hora, la app se activa sola y la página se actualiza.","Para verlas todas juntas, elige <b>Próximos estrenos</b> en el orden del catálogo."])],
+ ["megaphone","Novedades y spoilers","En la pestaña Novedades publico noticias del proyecto.",
+  UL(["Cada publicación tiene un tipo con su color: <b>Comunicado</b>, <b>Aviso</b>, <b>Devlog</b>, <b>Estreno</b> o <b>Spoiler</b>.","Las publicaciones <b>fijadas</b> aparecen primero.","Los <b>spoilers</b> salen borrosos para que nadie se arruine una sorpresa: pulsa <b>Mostrar spoiler</b> solo si quieres verlos.","La lista se actualiza sola cada pocos minutos."])],
+ ["mail","Sugerencias: cómo enviar un correo","Sirve para tres cosas: reportar un error, hacer una sugerencia o proponer una idea de qué crear.",
+  OL(["Abre la pestaña <b>Sugerencias</b> y elige el tipo.","Completa el formulario. Los campos con * son obligatorios. <b>Error:</b> dónde ocurrió, qué pasó, pasos para repetirlo y qué tan grave es. <b>Sugerencia:</b> sobre qué es, tu idea y por qué sería útil. <b>Idea:</b> qué quieres que se cree, para qué plataformas y de qué trata.","Si quieres una respuesta, escribe tu nombre y tu correo (es opcional). La casilla <b>Incluir información técnica</b> agrega tu sistema, navegador y tamaño de pantalla: viene marcada en los errores y puedes desmarcarla.","Revisa la <b>vista previa</b>: así llegará el correo.","Pulsa <b>Abrir en mi correo</b> (usa la app de correo de tu dispositivo), <b>Abrir en Gmail</b> (se abre en otra pestaña) o <b>Copiar mensaje</b> (pégalo en cualquier correo dirigido a tech.studios270@gmail.com).","En tu programa de correo, revisa el mensaje y pulsa <b>Enviar</b>."])+TIP("La página no envía nada por sí sola: solo prepara el correo. Si necesitas mostrar un error, adjunta tú mismo una captura de pantalla antes de enviar.")],
+ ["clip","Cuestionario","Son preguntas cortas que ayudan a decidir qué crear y qué mejorar.",
+  OL(["Abre la pestaña <b>Cuestionario</b>. Si dice que está cerrado, vuelve más tarde.","Responde: algunas preguntas piden <b>una opción</b> (círculos), otras <b>varias</b> (casillas), una <b>escala del 1 al 5</b> (1 es nada, 5 es mucho) o una <b>respuesta escrita</b>.","Las preguntas con * son obligatorias. Las que falten se marcan en rojo y la barra de arriba muestra cuánto llevas.","Marca la casilla de consentimiento: tus respuestas se guardan para mejorar el sitio. No escribas datos personales sensibles.","Pulsa <b>Enviar respuestas</b>. Solo puedes responder una vez desde tu dispositivo."])],
+ ["coffee","Cómprame un café","Si te gusta mi trabajo, puedes apoyarlo con una donación voluntaria.",
+  OL(["Abre la pestaña <b>Cómprame un café</b>.","Elige un monto rápido (3, 5, 10 o 20) o <b>Otro monto</b>.","Se abre PayPal en una pestaña nueva. Ahí inicias sesión y confirmas el pago.","Es voluntario y no da derecho a productos ni servicios. Este sitio no ve ni guarda tus datos de pago."])+TIP("Si aún no está configurado, verás un aviso de que las donaciones estarán disponibles pronto.")],
+ ["help","Personaliza y privacidad","Pequeños detalles que ayudan:",
+  UL(["<b>Estilo visual:</b> el botón de arriba cambia entre Neón y Liquid Glass. El sitio recuerda tu elección.","<b>Cookies:</b> al entrar aparece un aviso. Si aceptas, se usa Google Analytics para medir visitas. Puedes cambiar de opinión cuando quieras en <b>Preferencias de cookies</b>, al final de la página.","<b>Documentos legales:</b> en el pie de página están la Política de Privacidad, los Términos de Uso, las Condiciones, el Acuerdo Legal, el EULA, las Cookies, la Propiedad Intelectual y la Seguridad.","<b>Ayuda:</b> el botón de arriba (o el enlace del pie) abre de nuevo esta guía."])],
+ ["alert","Problemas frecuentes","Antes de escribirme, prueba esto:",
+  UL(["<b>La página se ve rara o no responde:</b> recárgala con "+K("Ctrl")+" + "+K("Shift")+" + "+K("R")+" (en el celular, desliza hacia abajo).","<b>Las descargas aparecen bloqueadas:</b> es una pausa de seguridad temporal. Intenta más tarde.","<b>El archivo no abre:</b> revisa que sea el de tu plataforma y sigue la guía de instalación.","<b>Windows, macOS o Android muestran una advertencia:</b> es normal con software nuevo. Confirma que lo descargaste desde este sitio.","<b>En iPhone o iPad no instala:</b> usa Safari y revisa el paso especial para iOS.","<b>No se ve el tráiler:</b> un bloqueador de anuncios puede bloquear YouTube.","<b>Sigue sin funcionar:</b> cuéntamelo en Sugerencias, con el tipo «Reportar un error»."])],
+ ["check","¡Listo!","Ya conoces todo el sitio. Si quieres, ve directo a una sección:",
+  `<div class="tgo"><button class="sec" data-act="gotab" data-tab="dl">Ir a Descargas</button><button class="sec" data-act="gotab" data-tab="su">Ir a Sugerencias</button></div>`]
+];
+const IOSSTEP=["share",IOS?"Instala en tu iPhone o iPad":"Si usas iPhone o iPad","En iPhone y iPad las apps se instalan como PWA: se ven y funcionan como una app normal, sin pasar por la App Store.",
+ OL(["Abre este sitio en <b>Safari</b>.","Toca el botón <b>Compartir</b> "+ic("share",18)+" (en iPhone está abajo; en iPad, arriba a la derecha).","Desliza el menú y elige <b>Añadir a pantalla de inicio</b> "+ic("addhome",18)+".","Toca <b>Añadir</b>. Verás el icono en tu pantalla de inicio y se abrirá a pantalla completa, como una app."])+TIP("Los archivos .apk y .exe no funcionan en iOS: usa los botones <b>Abrir PWA</b> de cada app. Si no ves «Añadir a pantalla de inicio», confirma que estás en Safari y no dentro de otra app (Instagram, Facebook…)."),"ios"];
+TOUR.splice(IOS?1:TOUR.findIndex(s=>s[1]==="Instalar según tu dispositivo")+1,0,IOSSTEP);
 let ti=0;
+$("tIdx").innerHTML=TOUR.map((s,k)=>`<option value="${k}">${k+1}. ${esc(s[1])}</option>`).join("");
 function drawTour(dir){
-  const [i,t,x]=TOUR[ti],b=$("tBody");
-  $("tIcon").innerHTML=ic(i,44);$("tTitle").textContent=t;if(TOUR[ti][3])$("tText").innerHTML=esc(x)+TOUR[ti][3];else $("tText").textContent=x;
+  const [i,t,x,html]=TOUR[ti],b=$("tBody");
+  $("tIcon").innerHTML=ic(i,44);$("tTitle").textContent=t;$("tText").innerHTML=esc(x)+(html||"");b.classList.toggle("rich",!!html);
   b.classList.remove("sl","sr");void b.offsetWidth;if(dir)b.classList.add(dir>0?"sl":"sr");
   $("tBar").style.width=((ti+1)/TOUR.length*100)+"%";
-  $("tDots").innerHTML=TOUR.map((_,k)=>`<i class="${k===ti?"on":""}" data-k="${k}"></i>`).join("");
+  $("tDots").textContent="Paso "+(ti+1)+" de "+TOUR.length;$("tIdx").value=String(ti);
   $("tPrev").style.visibility=ti?"visible":"hidden";$("tNext").textContent=ti===TOUR.length-1?"Empezar":"Siguiente";
+  dTour.scrollTop=0;
 }
+$("tIdx").onchange=()=>{const n=+$("tIdx").value;const d=n>ti?1:-1;ti=n;drawTour(d)};
 function openTour(k){ti=typeof k==="number"?k:0;drawTour(0);if(!dTour.open)dTour.showModal();track("tutorial_begin")}
 $("tNext").onclick=()=>{if(ti===TOUR.length-1){track("tutorial_complete");dTour.close();return}ti++;drawTour(1)};
 $("tPrev").onclick=()=>{if(ti>0){ti--;drawTour(-1)}};
@@ -755,7 +815,7 @@ function openLegal(k){const d=LD[k];if(!d)return;$("lgBody").innerHTML=`<h2>${d[
 dLegal.onclose=()=>{try{history.replaceState(null,"",location.pathname)}catch(e){}};
 document.addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;if(b.tagName==="A")e.preventDefault();
   if(a==="close")$(b.dataset.d).close();else if(a==="legal")openLegal(b.dataset.k);
-  else if(a==="edit")window.editApp(b.dataset.id);else if(a==="del")window.delApp(b.dataset.id);else if(a==="q")window.togQ(b.dataset.id);else if(a==="tour")openTour();else if(a==="consent")showConsent();else if(a==="spoil")b.closest(".spoil").classList.add("open");else if(a==="pedit")editPost(b.dataset.id);else if(a==="pdel")delPost(b.dataset.id)});
+  else if(a==="edit")window.editApp(b.dataset.id);else if(a==="del")window.delApp(b.dataset.id);else if(a==="q")window.togQ(b.dataset.id);else if(a==="tour")openTour();else if(a==="gotab"){dTour.close();setTab(b.dataset.tab)}else if(a==="consent")showConsent();else if(a==="spoil")b.closest(".spoil").classList.add("open");else if(a==="pedit")editPost(b.dataset.id);else if(a==="pdel")delPost(b.dataset.id)});
 if(LD[location.hash.slice(1)])openLegal(location.hash.slice(1));
 
 const setLiquid=v=>{document.body.classList.toggle("liquid",v);document.documentElement.classList.toggle("lq",v);$("bStyle").innerHTML=v?ic("palette",16)+" Neón":ic("drop",16)+" Liquid Glass";try{localStorage.setItem("ts_style",v?"liquid":"neon")}catch(e){}};

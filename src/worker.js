@@ -3,6 +3,7 @@
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { sigv4Presign, enc } from "./sigv4.js";
 let ENV = {}; // variables y base de datos de Cloudflare (se asignan en cada solicitud)
+let STORED = {}; // almacenamiento configurado desde el panel del sitio (guardado en D1, no en GitHub)
 
 const CFG = {
   HASH: "eec1bef54f8294b74223e78078ce1b3116b246ee23df4c184ee2bea501dd8586", SALT: "techstudios-store-v1",
@@ -42,11 +43,13 @@ const guessQuota = h => /filebase/.test(h) ? 5 : 10;
 function readStores() {
   const e = Object.fromEntries(Object.entries(ENV).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])), out = [];
   for (const [id, p] of [["s3", "S3_"], ["s3b", "S3B_"]]) {
-    if (!(e[p + "ENDPOINT"] && e[p + "KEY_ID"] && e[p + "SECRET"] && e[p + "BUCKET"])) continue;
-    const host = e[p + "ENDPOINT"].replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const sv = STORED[id] || {};
+    const endpoint = e[p + "ENDPOINT"] || sv.endpoint, keyId = e[p + "KEY_ID"] || sv.keyId, secret = e[p + "SECRET"] || sv.secret, bucket = e[p + "BUCKET"] || sv.bucket;
+    if (!(endpoint && keyId && secret && bucket)) continue;
+    const host = String(endpoint).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     const b2 = host.match(/^s3\.([^.]+)\.backblazeb2\.com$/);
-    out.push({ id, host, region: e[p + "REGION"] || (b2 ? b2[1] : "us-east-1"), ak: e[p + "KEY_ID"], sk: e[p + "SECRET"], bucket: e[p + "BUCKET"],
-      label: e[p + "LABEL"] || guessLabel(host), quota: (+e[p + "QUOTA_GB"] || guessQuota(host)) * GB });
+    out.push({ id, host, region: e[p + "REGION"] || (b2 ? b2[1] : "us-east-1"), ak: keyId, sk: secret, bucket,
+      label: e[p + "LABEL"] || sv.label || guessLabel(host), quota: (+e[p + "QUOTA_GB"] || +sv.quota || guessQuota(host)) * GB });
   }
   if (e.R2_ACCOUNT_ID && e.R2_ACCESS_KEY_ID && e.R2_SECRET_ACCESS_KEY && e.R2_BUCKET)
     out.push({ id: "r2", host: `${e.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, region: "auto", ak: e.R2_ACCESS_KEY_ID, sk: e.R2_SECRET_ACCESS_KEY, bucket: e.R2_BUCKET, label: "Cloudflare R2", quota: 10 * GB });
@@ -256,6 +259,7 @@ async function handle(req) {
   const m = req.method;
   const ip = req.headers.get("cf-connecting-ip") || "0.0.0.0";
   const iph = ipH(ip);
+  STORED = await rd("storage", {});
   try {
     /* ===== público ===== */
     if (m === "GET" && path === "catalog") {
@@ -374,12 +378,31 @@ async function handle(req) {
       }
       const am = a.match(/^media\/([0-9a-f-]{36})$/i);
       if (m === "GET" && am) { const x = (await rd("catalog", [])).find(y => y.id === am[1]); return x ? J(mediaView(x)) : J({ error: "notfound" }, 404); }
+      if (m === "PUT" && a === "storage-config") {
+        const f = frozen(); if (f) return f;
+        const e = await pinCheck(req, iph); if (e) return J({ error: "pin", wait: e.wait }, e.s);
+        const b = await readBody(req); const id = b.id === "s3b" ? "s3b" : "s3"; const cur = await rd("storage", {});
+        if (b.clear) delete cur[id];
+        else {
+          const endpoint = String(b.endpoint || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+          const bucket = String(b.bucket || "").trim(), keyId = String(b.keyId || "").trim(), secret = String(b.secret || "").trim();
+          if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(endpoint)) return J({ error: "El endpoint debe ser solo el dominio, por ejemplo s3.us-west-004.backblazeb2.com (sin https://)." }, 400);
+          if (!/^[A-Za-z0-9][A-Za-z0-9.-]{1,62}$/.test(bucket)) return J({ error: "El nombre del bucket no es válido (solo letras, números, guiones y puntos)." }, 400);
+          if (keyId.length < 6 || keyId.length > 100) return J({ error: "Revisa el keyID." }, 400);
+          const prev = cur[id] || {}; if (!secret && !prev.secret) return J({ error: "Pega la applicationKey (se muestra una sola vez en Backblaze)." }, 400);
+          cur[id] = { endpoint, bucket, keyId, secret: secret.slice(0, 200) || prev.secret };
+        }
+        await wr("storage", cur); STORED = cur; return J({ ok: true });
+      }
       if (m === "GET" && a === "storage-check") {
         const names = Object.keys(ENV).filter(k => !["DB", "ASSETS"].includes(k));
         const out = [];
         for (const [id, p, label] of [["s3", "S3_", "Almacenamiento principal (S3_…)"], ["s3b", "S3B_", "Almacenamiento secundario (S3B_…)"]]) {
-          const need = ["ENDPOINT", "KEY_ID", "SECRET", "BUCKET"], have = need.filter(k => String(ENV[p + k] || "").trim());
-          const entry = { id, label, missing: need.filter(k => !have.includes(k)).map(k => p + k), found: have.map(k => p + k) };
+          const need = ["ENDPOINT", "KEY_ID", "SECRET", "BUCKET"], sm = { ENDPOINT: "endpoint", KEY_ID: "keyId", SECRET: "secret", BUCKET: "bucket" };
+          const fromEnv = k => String(ENV[p + k] || "").trim(), fromPanel = k => String((STORED[id] || {})[sm[k]] || "").trim();
+          const have = need.filter(k => fromEnv(k) || fromPanel(k));
+          const entry = { id, label, missing: need.filter(k => !have.includes(k)).map(k => p + k), found: have.map(k => p + k + (fromEnv(k) ? "" : " (guardada en el sitio)")),
+            keyPreview: (fromEnv("KEY_ID") || fromPanel("KEY_ID")).slice(0, 4) };
           const st = stores().find(x => x.id === id);
           if (st) {
             entry.host = st.host; entry.bucket = st.bucket; entry.region = st.region;

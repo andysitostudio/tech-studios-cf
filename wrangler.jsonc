@@ -4,6 +4,10 @@
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "keep_vars": true,
+  "vars": {
+  "S3_ENDPOINT": "s3.us-west-004.backblazeb2.com",
+  "S3_BUCKET": "techstudios-apps-2026"
+},
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

@@ -273,6 +273,7 @@ $("diagBtn").onclick=async()=>{
     if(s.missing.length&&s.found.length)L.push("  Faltan: "+s.missing.join(", "));
     if(s.host)L.push("  Servidor: "+s.host+" · bucket: "+s.bucket+" · región: "+s.region);
     if(s.keyLen)L.push("  keyID guardado: "+s.keyLen+" caracteres (empieza con "+s.keyStart+") · applicationKey guardada: "+s.secretLen+" caracteres");
+    if(s.steps)L.push("  Pruebas: "+s.steps.map(t=>t.n+": "+(t.s==null?"—":(t.s>=200&&t.s<300?"correcto":t.s+(t.c?" "+t.c:"")))).join(" · "));
     L.push("  "+(s.status!=null?"Prueba de conexión: "+(s.status||"sin respuesta")+(s.code?" ("+s.code+")":"")+" → ":"")+s.hint);
   }
   L.push("","Variables relacionadas que ve el servidor: "+(r.j.seen.length?r.j.seen.join(", "):"ninguna"));

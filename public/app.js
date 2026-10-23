@@ -272,7 +272,8 @@ $("diagBtn").onclick=async()=>{
     if(s.found.length)L.push("  Datos encontrados: "+s.found.join(", "));
     if(s.missing.length&&s.found.length)L.push("  Faltan: "+s.missing.join(", "));
     if(s.host)L.push("  Servidor: "+s.host+" · bucket: "+s.bucket+" · región: "+s.region);
-    L.push("  "+(s.status!=null?"Prueba de conexión: "+(s.status||"sin respuesta")+" → ":"")+s.hint);
+    if(s.keyLen)L.push("  keyID guardado: "+s.keyLen+" caracteres (empieza con "+s.keyStart+") · applicationKey guardada: "+s.secretLen+" caracteres");
+    L.push("  "+(s.status!=null?"Prueba de conexión: "+(s.status||"sin respuesta")+(s.code?" ("+s.code+")":"")+" → ":"")+s.hint);
   }
   L.push("","Variables relacionadas que ve el servidor: "+(r.j.seen.length?r.j.seen.join(", "):"ninguna"));
   if(!r.j.upload)L.push("","Si no aparece S3_ENDPOINT, S3_KEY_ID, S3_SECRET y S3_BUCKET en la lista de arriba, no se guardaron en ESTE Worker o falta pulsar Deploy. Revisa que los nombres estén en mayúsculas y escritos igual.");

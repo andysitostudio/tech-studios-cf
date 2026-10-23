@@ -406,10 +406,22 @@ async function handle(req) {
           const st = stores().find(x => x.id === id);
           if (st) {
             entry.host = st.host; entry.bucket = st.bucket; entry.region = st.region;
+            entry.keyLen = st.ak.length; entry.secretLen = st.sk.length; entry.keyStart = st.ak.slice(0, 4);
             try {
-              const x = await fetch(r2url("HEAD", "files/__diagnostico__/x", 60, {}, id), { method: "HEAD" });
-              entry.status = x.status;
-              entry.hint = x.status === 404 ? "OK: las claves y el bucket funcionan." : x.status === 403 ? "Las claves no tienen permiso o están mal copiadas (keyID o applicationKey), o la clave no es de este bucket." : x.status === 400 ? "Revisa el endpoint y el nombre del bucket: Backblaze no los reconoce." : x.status === 301 || x.status === 307 ? "El endpoint no corresponde a la región del bucket." : "Respuesta inesperada del almacenamiento.";
+              const x = await fetch(r2url("GET", "files/__diagnostico__/x", 60, {}, id));
+              const body = (await x.text()).slice(0, 800);
+              const code = (body.match(/<Code>([^<]+)<\/Code>/) || [])[1] || ""; entry.status = x.status; entry.code = code;
+              const H = {
+                NoSuchKey: "OK: las claves y el bucket funcionan.",
+                InvalidAccessKeyId: "El keyID no existe en Backblaze: está mal copiado, o es de otra cuenta o de una clave ya borrada.",
+                SignatureDoesNotMatch: "El keyID existe, pero la applicationKey no corresponde: está mal copiada (revisa que no falte ni sobre un carácter) o es de otra clave. Si usaste la «Master Application Key», crea una clave normal para el bucket.",
+                AccessDenied: "La clave existe pero no tiene permiso en este bucket: fue creada para otro bucket o sin «Read and Write».",
+                NoSuchBucket: "Backblaze no encuentra un bucket con ese nombre (o la clave está limitada a otro). Revisa el nombre exacto.",
+                InvalidBucketName: "El nombre del bucket no es válido para Backblaze.",
+                AuthorizationHeaderMalformed: "Revisa el endpoint: la región no coincide con la del bucket.",
+                RequestTimeTooSkewed: "La hora del servidor no coincide con la de Backblaze. Reintenta en unos minutos.",
+              };
+              entry.hint = H[code] || (x.status === 404 ? "OK: las claves y el bucket funcionan." : x.status === 403 ? "Backblaze rechazó las claves (403) sin dar más detalle." : x.status === 400 ? "Revisa el endpoint y el nombre del bucket." : x.status === 301 || x.status === 307 ? "El endpoint no corresponde a la región del bucket." : "Respuesta inesperada del almacenamiento.");
             } catch { entry.status = 0; entry.hint = "No se pudo conectar. Revisa que S3_ENDPOINT sea solo el dominio, sin https:// y sin espacios."; }
           } else if (have.length) entry.hint = "Faltan variables: " + entry.missing.join(", ") + ".";
           else entry.hint = "No hay ninguna variable de este grupo.";

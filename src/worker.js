@@ -408,20 +408,33 @@ async function handle(req) {
             entry.host = st.host; entry.bucket = st.bucket; entry.region = st.region;
             entry.keyLen = st.ak.length; entry.secretLen = st.sk.length; entry.keyStart = st.ak.slice(0, 4);
             try {
-              const x = await fetch(r2url("GET", "files/__diagnostico__/x", 60, {}, id));
-              const body = (await x.text()).slice(0, 800);
-              const code = (body.match(/<Code>([^<]+)<\/Code>/) || [])[1] || ""; entry.status = x.status; entry.code = code;
+              // Prueba real: escribir un archivo diminuto, leerlo y borrarlo (así se ve qué permisos tiene la clave).
+              const key = "files/__diagnostico__/" + Date.now() + ".txt";
+              const step = async (method, body) => {
+                const x = await fetch(r2url(method, key, 60, {}, id), body ? { method, body } : { method });
+                const t = (await x.text()).slice(0, 800);
+                return { status: x.status, code: (t.match(/<Code>([^<]+)<\/Code>/) || [])[1] || "" };
+              };
               const H = {
-                NoSuchKey: "OK: las claves y el bucket funcionan.",
                 InvalidAccessKeyId: "El keyID no existe en Backblaze: está mal copiado, o es de otra cuenta o de una clave ya borrada.",
-                SignatureDoesNotMatch: "El keyID existe, pero la applicationKey no corresponde: está mal copiada (revisa que no falte ni sobre un carácter) o es de otra clave. Si usaste la «Master Application Key», crea una clave normal para el bucket.",
-                AccessDenied: "La clave existe pero no tiene permiso en este bucket: fue creada para otro bucket o sin «Read and Write».",
+                SignatureDoesNotMatch: "El keyID existe, pero la applicationKey no corresponde: está mal copiada o es de otra clave. Si usaste la «Master Application Key», crea una clave normal para el bucket.",
                 NoSuchBucket: "Backblaze no encuentra un bucket con ese nombre (o la clave está limitada a otro). Revisa el nombre exacto.",
                 InvalidBucketName: "El nombre del bucket no es válido para Backblaze.",
                 AuthorizationHeaderMalformed: "Revisa el endpoint: la región no coincide con la del bucket.",
                 RequestTimeTooSkewed: "La hora del servidor no coincide con la de Backblaze. Reintenta en unos minutos.",
               };
-              entry.hint = H[code] || (x.status === 404 ? "OK: las claves y el bucket funcionan." : x.status === 403 ? "Backblaze rechazó las claves (403) sin dar más detalle." : x.status === 400 ? "Revisa el endpoint y el nombre del bucket." : x.status === 301 || x.status === 307 ? "El endpoint no corresponde a la región del bucket." : "Respuesta inesperada del almacenamiento.");
+              const w = await step("PUT", "ok"); const wOk = w.status >= 200 && w.status < 300;
+              const r = wOk ? await step("GET") : null, d = wOk ? await step("DELETE") : null;
+              const rOk = r && r.status === 200, dOk = d && d.status >= 200 && d.status < 300;
+              entry.steps = [{ n: "Escribir", s: w.status, c: w.code }, { n: "Leer", s: r ? r.status : null, c: r ? r.code : "" }, { n: "Borrar", s: d ? d.status : null, c: d ? d.code : "" }];
+              const bad = !wOk ? w : !rOk ? r : !dOk ? d : null;
+              entry.status = bad ? bad.status : 200; entry.code = bad ? bad.code : "";
+              entry.hint = !bad ? "OK: las claves y el bucket funcionan (se pudo escribir, leer y borrar un archivo de prueba)."
+                : H[bad.code] || (bad.code === "AccessDenied" || bad.status === 403
+                  ? (!wOk ? "La clave NO puede escribir en este bucket. Causas típicas al crearla en Backblaze: está limitada a OTRO bucket, el tipo de acceso es «Read Only», o tiene un «File name prefix» escrito. Crea una clave nueva solo para este bucket, con «Read and Write» y sin prefijo."
+                    : !rOk ? "La clave puede escribir pero NO leer: el tipo de acceso es «Write Only». Crea una clave con «Read and Write»."
+                    : "La clave puede escribir y leer pero NO borrar. Crea una clave con «Read and Write» completo.")
+                  : "Respuesta inesperada del almacenamiento (" + bad.status + ").");
             } catch { entry.status = 0; entry.hint = "No se pudo conectar. Revisa que S3_ENDPOINT sea solo el dominio, sin https:// y sin espacios."; }
           } else if (have.length) entry.hint = "Faltan variables: " + entry.missing.join(", ") + ".";
           else entry.hint = "No hay ninguna variable de este grupo.";

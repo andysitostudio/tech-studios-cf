@@ -1,5 +1,44 @@
 if(top!==self){try{top.location.href=location.href}catch(e){document.documentElement.style.display="none"}}
 const $=id=>document.getElementById(id);
+/* ---------- Adaptación al dispositivo y al rendimiento ---------- */
+const mq=q=>window.matchMedia?matchMedia(q):{matches:false,addEventListener(){}};
+const RMQ=mq("(prefers-reduced-motion:reduce)"),HOVQ=mq("(hover:hover) and (pointer:fine)");
+let FX="auto";try{FX=localStorage.getItem("ts_fx")||"auto"}catch(e){}
+let fxLevel="full",perfLow=0,batLow=false,fxRestart=null;
+const LEVELS=["full","mid","lite"];
+function detectLevel(){
+  const n=navigator,mem=n.deviceMemory||4,cores=n.hardwareConcurrency||4,con=n.connection||{};
+  if(con.saveData||/(^|-)2g$/.test(con.effectiveType||"")||mem<=2||cores<=2)return "lite";
+  if(!HOVQ.matches||mem<=4||cores<=4||innerWidth<720)return "mid";
+  return "full";
+}
+const FXN={auto:"Automático",lite:"Ligeros",full:"Completos"};
+function fxLabel(){const l=$("fxLink");if(l)l.textContent="Efectos visuales: "+FXN[FX]+(FX==="auto"?" ("+{lite:"ligeros",mid:"medios",full:"completos"}[fxLevel]+")":"")}
+function applyFx(){
+  let i=FX==="lite"?2:FX==="full"?0:LEVELS.indexOf(detectLevel());
+  if(FX==="auto")i=Math.min(2,i+perfLow+(batLow?1:0));
+  if(RMQ.matches&&FX!=="full")i=2;
+  fxLevel=LEVELS[i];
+  const c=document.documentElement.classList;c.remove("lite","mid","full");c.add(fxLevel);c.toggle("touch",!HOVQ.matches);c.toggle("mouse",HOVQ.matches);
+  fxLabel();if(fxRestart)fxRestart();
+}
+function cycleFx(){FX=FX==="auto"?"lite":FX==="lite"?"full":"auto";try{localStorage.setItem("ts_fx",FX)}catch(e){}perfLow=0;applyFx();toast("Efectos visuales: "+FXN[FX]+".")}
+applyFx();
+if(RMQ.addEventListener)RMQ.addEventListener("change",applyFx);
+let rsT;addEventListener("resize",()=>{clearTimeout(rsT);rsT=setTimeout(applyFx,300)},{passive:true});
+try{navigator.getBattery&&navigator.getBattery().then(b=>{const f=()=>{const v=b.level<.2&&!b.charging;if(v!==batLow){batLow=v;applyFx()}};f();b.addEventListener("levelchange",f);b.addEventListener("chargingchange",f)}).catch(()=>{})}catch(e){}
+/* Si el equipo va lento (muchos cuadros perdidos), baja un nivel de efectos automáticamente. */
+function perfProbe(){
+  if(FX!=="auto"||fxLevel==="lite"||RMQ.matches)return;
+  let n=0,slow=0,last=0;
+  const f=t=>{
+    if(document.hidden){last=0;setTimeout(()=>requestAnimationFrame(f),700);return}
+    if(last&&t-last>34)slow++;last=t;
+    if(++n<150)requestAnimationFrame(f);
+    else if(slow>45&&perfLow<2){perfLow++;applyFx();toast("Ajusté los efectos para que todo vaya más fluido. Puedes cambiarlo en «Efectos visuales», al final de la página.");setTimeout(perfProbe,3000)}
+  };
+  setTimeout(()=>requestAnimationFrame(f),2500);
+}
 const PL={
 win:["Windows 11","uWin",".exe, .msi, .msix, .zip"],
 mac:["macOS","uMac",".dmg, .pkg, .zip"],
@@ -70,7 +109,7 @@ setInterval(()=>{if(admin&&!tok())logout(true)},10000);
 let hid=0;document.addEventListener("visibilitychange",()=>{if(document.hidden)hid=Date.now();else if(admin&&hid&&Date.now()-hid>5*60*1000)logout(true)});
 addEventListener("keydown",e=>{if(e.key==="/"&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)&&!document.querySelector("dialog[open]")){e.preventDefault();$("q").focus()}});
 let tT;function toast(m){const t=$("toast");t.textContent=m;t.classList.add("on");clearTimeout(tT);tT=setTimeout(()=>t.classList.remove("on"),2800)}
-function countUp(el,to,from){const f=from!=null?from:(+el.textContent||0);if(f===to){el.textContent=to;return}const t0=performance.now();(function s(t){const k=Math.min(1,(t-t0)/900);el.textContent=Math.round(f+(to-f)*(1-Math.pow(1-k,4))).toLocaleString("es-CL");if(k<1)requestAnimationFrame(s)})(t0)}
+function countUp(el,to,from){const f=from!=null?from:(+el.textContent||0);if(f===to){el.textContent=to;return}const D=fxLevel==="lite"||RMQ.matches?0:fxLevel==="mid"?500:900;if(!D){el.textContent=to.toLocaleString("es-CL");return}const t0=performance.now();(function s(t){const k=Math.min(1,(t-t0)/D);el.textContent=Math.round(f+(to-f)*(1-Math.pow(1-k,4))).toLocaleString("es-CL");if(k<1)requestAnimationFrame(s)})(t0)}
 const canEdit=()=>{if(!admin)return false;if(status.frozen){toast("Panel congelado: solo lectura.");return false}return true};
 
 /* ---------- Bloqueo / render ---------- */
@@ -102,7 +141,7 @@ function render(){
   if(!list.length){G.innerHTML=`<div class="empty">${vis.length?"Sin resultados.":"Aún no hay apps publicadas."}</div>`;return}
   const old=new Map([...G.querySelectorAll(".card[data-id]")].map(e=>[e.dataset.id,e.getBoundingClientRect()]));
   G.innerHTML=list.map((a,i)=>`<article class="card${seen.has(a.id)?" seen":""}" data-id="${esc(a.id)}" style="--i:${i}">
-    ${a.cover?`<div class="cover"><img src="${esc(a.cover)}" alt="" loading="lazy">${a.tr?`<span class="play">${ic("play",16)}</span>`:""}</div>`:""}<div class="top">${a.icon?`<img class="ico" src="${esc(a.icon)}" alt="">`:`<div class="ico">${ic("box",30)}</div>`}<div style="flex:1;min-width:0"><h3>${esc(a.name)}</h3><div class="mut">${a.saga?esc(a.saga)+" · ":""}v${esc(a.ver)}</div></div>
+    ${a.cover?`<div class="cover"><img src="${esc(a.cover)}" alt="" loading="lazy" decoding="async">${a.tr?`<span class="play">${ic("play",16)}</span>`:""}</div>`:""}<div class="top">${a.icon?`<img class="ico" src="${esc(a.icon)}" alt="" decoding="async">`:`<div class="ico">${ic("box",30)}</div>`}<div style="flex:1;min-width:0"><h3>${esc(a.name)}</h3><div class="mut">${a.saga?esc(a.saga)+" · ":""}v${esc(a.ver)}</div></div>
     <div class="dlc" title="Descargas totales">${ic("download",15)}<b class="cnt" data-to="${a.dl}">0</b></div></div>
     <div class="tags"><span class="tag">${esc(a.cat)}</span>${a.q?`<span class="tag" style="border-color:var(--bad);color:var(--bad)">En cuarentena</span>`:""}${a.release>Date.now()?`<span class="tag soon">Próximamente</span>`:""}${a.plat.map(x=>`<span class="tag" style="display:inline-flex;gap:4px;align-items:center">${lg(x,12)}${PL[x][0]}</span>`).join("")}</div>
     <div class="desc">${esc(a.desc)}</div>
@@ -114,9 +153,10 @@ function render(){
     <div class="plats">${a.plat.map(x=>`<span class="pl" title="${PL[x][0]}">${lg(x,28)}<span>${PL[x][0]}</span></span>`).join("")}</div>
     <div class="adm"><button class="sec" data-act="edit" data-id="${esc(a.id)}">Editar</button><button class="sec" data-act="q" data-id="${esc(a.id)}">${a.q?"Mostrar":"Ocultar"}</button><button class="bad" data-act="del" data-id="${esc(a.id)}">Eliminar</button></div>
   </article>`).join("");
+  const flipOk=fxLevel!=="lite"&&!RMQ.matches&&list.length<=80;
   G.querySelectorAll(".card[data-id]").forEach(e=>{
     const id=e.dataset.id,n=e.getBoundingClientRect(),o=old.get(id),cnt=e.querySelector(".cnt"),to=+cnt.dataset.to;
-    if(o){const dx=o.left-n.left,dy=o.top-n.top;if(dx||dy)e.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"none"}],{duration:600,easing:"cubic-bezier(.2,.8,.2,1)"})}
+    if(o&&flipOk){const dx=o.left-n.left,dy=o.top-n.top;if(dx||dy)e.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:"none"}],{duration:600,easing:"cubic-bezier(.2,.8,.2,1)"})}
     seen.has(id)?cnt.textContent=to.toLocaleString("es-CL"):countUp(cnt,to,0);seen.add(id)});
 }
 ["q","fCat","fPlat","fSort"].forEach(i=>$(i).addEventListener("input",render));
@@ -381,6 +421,20 @@ const OL=a=>`<ol class="ios">${a.map(x=>`<li>${x}</li>`).join("")}</ol>`;
 const TIP=t=>`<div class="tip">${t}</div>`;
 const DET=(os,t,h)=>`<details${OSN===os?" open":""}><summary>${t}</summary><div class="dbody">${h}</div></details>`;
 const K=t=>`<span class="kbd">${t}</span>`;
+const CUR='<svg class="mk-cur" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6 1.5L10 19z" fill="#fff" stroke="#05060f" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+const CAP=t=>`<div class="mk-cap">${t}</div>`;
+const MK={
+dl:()=>`<div class="mk mk-dl" role="img" aria-label="Ejemplo animado: se pulsa el botón de descarga de Windows y aparece la descarga en la parte de abajo del navegador"><div class="mc-card"><div class="mc-cover">${ic("play",14)}</div><div class="mc-top"><i class="mc-ico">${ic("box",20)}</i><div><b>Mi App</b><small>v1.0 · Juegos</small></div><span class="mc-n">${ic("download",11)} 128</span></div><div class="mc-btns"><span class="mc-b hit"><i class="mc-badge">1</i>${lg("win",13)} Descargar Windows 11 · 120 MB${CUR}</span><span class="mc-b">${lg("and",13)} Descargar Android · 45 MB</span></div></div><div class="mc-bar"><i class="mc-badge">2</i><span class="mc-file">${ic("download",13)} MiApp-Setup.exe</span><span class="mc-prog"><i></i></span><span class="mc-ok">Listo</span></div></div>`+CAP("<b>1.</b> Pulsa el botón de tu plataforma. <b>2.</b> Tu navegador empieza a descargar el archivo (suele aparecer abajo o arriba a la derecha)."),
+states:()=>`<div class="mk-states"><div><span class="btn">${lg("win",14)} Descargar Windows 11 · 120 MB</span><p>Listo para descargar.</p></div><div><button class="sec" disabled>${ic("lock",15)} Descargas bloqueadas</button><p>Pausa de seguridad temporal. Vuelve más tarde.</p></div><div><button class="sec" disabled>${ic("clock",15)} Disponible el 12 dic, 18:00</button><p>Aún no se estrena.</p></div><div><button class="sec" disabled>${ic("clock",15)} Android · próximamente</button><p>Esa versión todavía no está lista.</p></div><div><span class="btn">${lg("ios",14)} Abrir PWA iOS (PWA)</span><p>No descarga: se abre en el navegador.</p></div></div>`,
+win:()=>`<div class="mk mk-ss" role="img" aria-label="Ejemplo animado de la advertencia SmartScreen de Windows: se pulsa Más información y luego Ejecutar de todas formas"><div class="ssw"><div class="ss-a"><h5>Windows protegió su PC</h5><p>Microsoft Defender SmartScreen impidió el inicio de una aplicación no reconocida. Ejecutar esta aplicación podría poner en riesgo su PC.</p><u class="ss-more"><i class="mc-badge">1</i>Más información</u></div><div class="ss-b"><h5>Windows protegió su PC</h5><p>Aplicación: <b>MiApp-Setup.exe</b><br>Editor: <b>Editor desconocido</b></p><span class="ss-run"><i class="mc-badge">2</i>Ejecutar de todas formas</span><span class="ss-no">No ejecutar</span></div></div><svg class="mk-cur ss-cur" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6 1.5L10 19z" fill="#fff" stroke="#05060f" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`+CAP("Si Windows muestra esta pantalla azul: pulsa <b>1. Más información</b> y luego <b>2. Ejecutar de todas formas</b>. «Editor desconocido» es normal en programas independientes que no pagan una firma digital."),
+dmg:()=>`<div class="mk mk-dmg" role="img" aria-label="Ejemplo animado: se arrastra el icono de la app hasta la carpeta Aplicaciones"><div class="dmg-t">MiApp</div><div class="dmg-app"><i class="dmg-i">${ic("box",28)}</i><span>MiApp</span></div><div class="dmg-arrow"></div><div class="dmg-fold"><i class="dmg-f"><svg viewBox="0 0 24 24" width="52" height="52" fill="currentColor" aria-hidden="true"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></i><span>Aplicaciones</span></div></div>`+CAP("Al abrir el <b>.dmg</b>, arrastra el icono de la app hasta la carpeta <b>Aplicaciones</b>."),
+term:()=>`<div class="mk mk-term" role="img" aria-label="Ejemplo animado de comandos en la terminal de Linux"><div class="tbar"><i></i><i></i><i></i><span>Terminal</span></div><div class="tcode"><div><span class="p">$ </span><span class="typ t1">sudo apt install ./archivo.deb</span></div><div class="mut"># o, para un .AppImage:</div><div><span class="p">$ </span><span class="typ t2">chmod +x MiApp.AppImage &amp;&amp; ./MiApp.AppImage</span></div></div></div>`+CAP("Abre la terminal en la carpeta <b>Descargas</b> y escribe el comando que corresponda a tu archivo."),
+android:()=>`<div class="mk mk-and"><div class="ph" role="img" aria-label="Paso 1: permitir instalar apps desconocidas a tu navegador"><i class="mc-badge" style="top:8px;left:8px">1</i><h6>Instalar apps desconocidas</h6><div class="ph-row"><span>Chrome</span><i class="tgl"></i></div><div class="ph-cap">Activa el permiso para tu navegador (o para Archivos).</div></div><div class="ph" role="img" aria-label="Paso 2: pulsar Instalar"><i class="mc-badge" style="top:8px;left:8px">2</i><div class="ph-dlg"><b>¿Quieres instalar esta aplicación?</b><div class="ph-app">${ic("box",16)} Mi App</div><div class="ph-btns"><span>Cancelar</span><span class="ph-inst">Instalar</span></div></div></div></div>`+CAP("Los textos pueden variar un poco según la marca de tu celular."),
+ios:()=>`<div class="mk mk-and"><div class="ph" role="img" aria-label="Ejemplo animado en un iPhone: tocar Compartir, elegir Añadir a pantalla de inicio y tocar Añadir"><div class="ios-p ios-p1"><div class="ios-url">tech-studios.workers.dev</div><div class="ios-page"><i></i><i></i><i></i><i class="s"></i></div><div class="ios-tb"><span>‹</span><span>›</span><span class="ios-share"><i class="mc-badge">1</i>${ic("share",18)}</span><span>${ic("clip",16)}</span><span>${ic("box",16)}</span></div></div><div class="ios-p ios-p2"><div class="ios-page dim"><i></i><i></i></div><div class="ios-sheet"><div>Copiar</div><div>Añadir a marcadores</div><div class="ios-hl"><i class="mc-badge">2</i>Añadir a pantalla de inicio ${ic("addhome",15)}</div><div>Buscar en la página</div></div></div><div class="ios-p ios-p3"><div class="ios-hd"><span>Cancelar</span><b>Añadir a pantalla de inicio</b><span class="ios-add"><i class="mc-badge">3</i>Añadir</span></div><div class="ios-form"><i class="ios-ic">${ic("box",24)}</i><div><b>Mi App</b><small>tech-studios.workers.dev</small></div></div></div><div class="ios-p ios-p4"><div class="ios-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="new">${ic("box",22)}</i></div><div class="ios-lbl">Mi App <small>¡Listo!</small></div></div></div></div>`+CAP("<b>1.</b> Toca Compartir. <b>2.</b> Elige «Añadir a pantalla de inicio». <b>3.</b> Toca Añadir. El icono queda en tu pantalla de inicio."),
+pwa:()=>`<div class="mk mk-pwa" role="img" aria-label="Ejemplo animado: el navegador muestra el botón Instalar en la barra de direcciones"><div class="addr"><span class="url">tech-studios.workers.dev</span><span class="inst">${ic("download",14)}</span></div><div class="pop"><b>¿Instalar «Mi App»?</b><br><span class="pbtn">Instalar</span></div></div>`+CAP("En Chrome o Edge aparece un icono de instalación en la barra de direcciones."),
+flow:()=>`<div class="mk mk-flow" role="img" aria-label="Pasos: activar modo desarrollador, conectar el equipo e instalar el archivo"><div class="fl">${ic("unlock",22)}<br><b>1</b><br>Activa el modo desarrollador</div><span class="fa">→</span><div class="fl">${ic("power",22)}<br><b>2</b><br>Conecta tu equipo (USB o Wi-Fi)</div><span class="fa">→</span><div class="fl">${ic("download",22)}<br><b>3</b><br>Instala el archivo con la herramienta oficial</div></div>`,
+mc:()=>`<div class="mk mk-mc" role="img" aria-label="Ejemplo animado: el archivo .jar se copia a la carpeta mods de Minecraft"><div class="mcp">${ic("box",14)} %appdata%\\.minecraft\\mods</div><div class="mcl"><div>${ic("box",13)} fabric-api.jar</div><div class="mc-new">${ic("box",13)} mi-mod.jar <span style="margin-left:auto;color:#3dffb0">${ic("check",13)}</span></div></div><div class="mc-fly">mi-mod.jar</div></div>`+CAP("Copia el <b>.jar</b> descargado dentro de la carpeta <b>mods</b> (y reinicia el juego).")
+};
 const TOUR=[
  ["download","Bienvenido a Tech Studios","Aquí encuentras apps, juegos y mods para tus dispositivos. Esta guía explica todo el sitio con calma. Puedes saltar a cualquier tema con el menú «Ir a…» de arriba.",
   UL(["<b>Descargas:</b> el catálogo. Aquí buscas, ves los detalles y descargas.","<b>Novedades:</b> comunicados, avisos, devlogs y spoilers.","<b>Sugerencias:</b> reporta un error, propone una mejora o una idea de qué crear. El sitio te prepara el correo.","<b>Cuestionario:</b> preguntas cortas para ayudar a decidir qué crear.","<b>Cómprame un café:</b> apoyo voluntario por PayPal.","Arriba a la derecha tienes <b>Ayuda</b> (esta guía) y el botón de estilo visual (Neón o Liquid Glass)."])],
@@ -390,18 +444,18 @@ const TOUR=[
   UL(["<b>Portada e icono.</b> Un círculo con un triángulo de play sobre la portada indica que tiene tráiler.","<b>Nombre, saga y versión</b> (por ejemplo v1.2).","<b>Etiquetas:</b> la categoría, las plataformas con su logo y «Próximamente» si aún no sale.","<b>Descargas:</b> el total arriba a la derecha y, abajo, cuánto subió esta semana y este mes.","<b>Botones de descarga:</b> uno por plataforma, con el tamaño del archivo cuando se conoce, y los logos de las plataformas al final."])],
  ["eye","Ver el detalle: galería y tráiler","Haz clic (o toca) una tarjeta, fuera de los botones, para abrir su ventana de detalle.",
   OL(["Verás la descripción completa, las novedades de la versión y los botones de descarga.","Si la app tiene imágenes, pásalas con las flechas ‹ › o con las miniaturas de abajo. En computador también sirven las teclas "+K("←")+" y "+K("→")+".","Si tiene tráiler de YouTube, pulsa <b>Ver tráiler</b>. Hasta ese momento el sitio no se conecta con YouTube. Si es un video propio, usa los controles del reproductor.","Para cerrar, pulsa <b>Cerrar</b> o la tecla "+K("Esc")+"."])],
- ["download","Descargar paso a paso","Es muy simple:",
-  OL(["Elige el botón de <b>tu</b> plataforma (tiene su logo). Si una app existe para varias, verás un botón por cada una.","Mira el tamaño que aparece en el botón. Si es grande, mejor usa Wi-Fi.","Pulsa el botón. La descarga empieza sola: el sitio cuenta la descarga y te lleva al archivo.","Busca el archivo en la carpeta <b>Descargas</b> de tu dispositivo (en el navegador de un computador, "+K("Ctrl")+" + "+K("J")+" abre la lista de descargas). Luego sigue la guía de instalación del siguiente paso."])+
-  `<h4 class="th">Si el botón no te deja descargar</h4>`+UL(["<b>Candado o «bloqueada»:</b> las descargas están detenidas por seguridad por un rato. Vuelve más tarde.","<b>Reloj o «Disponible el…»:</b> la app aún no se estrena.","<b>«Próximamente» en una plataforma:</b> esa versión todavía no está lista.","<b>«Abrir PWA» o «Abrir»:</b> no descarga un archivo; se abre en el navegador."])+TIP("Descarga siempre desde los botones de este sitio. Los archivos de otras páginas pueden no ser seguros.")],
+ ["download","Descargar paso a paso","Mira el ejemplo animado y luego sigue los pasos:",
+  MK.dl()+OL(["Elige el botón de <b>tu</b> plataforma (tiene su logo). Si una app existe para varias, verás un botón por cada una.","Mira el tamaño que aparece en el botón. Si es grande, mejor usa Wi-Fi.","Pulsa el botón. La descarga empieza sola: el sitio cuenta la descarga y te lleva al archivo.","Busca el archivo en la carpeta <b>Descargas</b> de tu dispositivo (en el navegador de un computador, "+K("Ctrl")+" + "+K("J")+" abre la lista de descargas). Luego sigue la guía de instalación del siguiente paso."])+
+  `<h4 class="th">Si el botón no te deja descargar</h4>`+MK.states()+UL(["<b>Candado o «bloqueada»:</b> las descargas están detenidas por seguridad por un rato. Vuelve más tarde.","<b>Reloj o «Disponible el…»:</b> la app aún no se estrena.","<b>«Próximamente» en una plataforma:</b> esa versión todavía no está lista.","<b>«Abrir PWA» o «Abrir»:</b> no descarga un archivo; se abre en el navegador."])+TIP("Descarga siempre desde los botones de este sitio. Los archivos de otras páginas pueden no ser seguros.")],
  ["box","Instalar según tu dispositivo","Abre el tuyo (ya dejé abierto el que parece corresponder a tu equipo). Los programas nuevos suelen mostrar advertencias del sistema: es normal.",
-  DET("win","Windows 11 (.exe, .msi, .msix, .zip)",UL(["Doble clic en el archivo. Si es un <b>.zip</b>: clic derecho, <b>Extraer todo</b>, y abre el programa dentro de la carpeta.","Si aparece una pantalla azul de <b>SmartScreen</b>: pulsa <b>Más información</b> y luego <b>Ejecutar de todas formas</b>, solo si descargaste el archivo desde este sitio.","Windows puede pedir permiso de administrador para instalar. Acepta solo si tú iniciaste la instalación."]))+
-  DET("mac","macOS (.dmg, .pkg, .zip)",UL(["<b>.dmg:</b> ábrelo y arrastra la app a la carpeta <b>Aplicaciones</b>. <b>.pkg:</b> doble clic y sigue el asistente.","Si dice que no se puede abrir por ser de un desarrollador no identificado: clic derecho (o Control + clic) sobre la app, <b>Abrir</b> y otra vez <b>Abrir</b>."]))+
-  DET("lin","Linux (.AppImage, .deb, .rpm, .tar.gz)",UL(["<b>.AppImage:</b> clic derecho, <b>Propiedades</b>, <b>Permisos</b>, marca «Permitir ejecutar» y haz doble clic.","<b>.deb</b> (Ubuntu, Debian): doble clic, o en la terminal <code>sudo apt install ./archivo.deb</code>.","<b>.rpm</b> (Fedora): <code>sudo dnf install ./archivo.rpm</code>.","<b>.tar.gz:</b> extráelo y ejecuta el programa que trae dentro."]))+
-  DET("android","Android (.apk, .zip)",UL(["Toca el archivo descargado (o ábrelo desde la app <b>Archivos</b> o <b>Descargas</b>).","Android puede pedirte permitir «instalar apps desconocidas» para tu navegador o para Archivos. Actívalo, instala y luego vuelve a desactivarlo.","Si es un <b>.zip</b>, extráelo primero. Un archivo <b>.aab</b> no se instala directamente: busca el <b>.apk</b>."]))+
+  DET("win","Windows 11 (.exe, .msi, .msix, .zip)",MK.win()+UL(["Doble clic en el archivo. Si es un <b>.zip</b>: clic derecho, <b>Extraer todo</b>, y abre el programa dentro de la carpeta.","Si aparece una pantalla azul de <b>SmartScreen</b>: pulsa <b>Más información</b> y luego <b>Ejecutar de todas formas</b>, solo si descargaste el archivo desde este sitio.","Windows puede pedir permiso de administrador para instalar. Acepta solo si tú iniciaste la instalación."]))+
+  DET("mac","macOS (.dmg, .pkg, .zip)",MK.dmg()+UL(["<b>.dmg:</b> ábrelo y arrastra la app a la carpeta <b>Aplicaciones</b>. <b>.pkg:</b> doble clic y sigue el asistente.","Si dice que no se puede abrir por ser de un desarrollador no identificado: clic derecho (o Control + clic) sobre la app, <b>Abrir</b> y otra vez <b>Abrir</b>."]))+
+  DET("lin","Linux (.AppImage, .deb, .rpm, .tar.gz)",MK.term()+UL(["<b>.AppImage:</b> clic derecho, <b>Propiedades</b>, <b>Permisos</b>, marca «Permitir ejecutar» y haz doble clic.","<b>.deb</b> (Ubuntu, Debian): doble clic, o en la terminal <code>sudo apt install ./archivo.deb</code>.","<b>.rpm</b> (Fedora): <code>sudo dnf install ./archivo.rpm</code>.","<b>.tar.gz:</b> extráelo y ejecuta el programa que trae dentro."]))+
+  DET("android","Android (.apk, .zip)",MK.android()+UL(["Toca el archivo descargado (o ábrelo desde la app <b>Archivos</b> o <b>Descargas</b>).","Android puede pedirte permitir «instalar apps desconocidas» para tu navegador o para Archivos. Actívalo, instala y luego vuelve a desactivarlo.","Si es un <b>.zip</b>, extráelo primero. Un archivo <b>.aab</b> no se instala directamente: busca el <b>.apk</b>."]))+
   DET("ios","iPhone y iPad (PWA)",UL(["Abre el sitio en <b>Safari</b>, toca <b>Compartir</b> "+ic("share",16)+", elige <b>Añadir a pantalla de inicio</b> "+ic("addhome",16)+" y toca <b>Añadir</b>.","Los archivos .apk y .exe no funcionan en iOS. Hay un paso con más detalle justo después."]))+
-  DET("web","Web / HTML5 (botón «Abrir»)",UL(["Se abre en una pestaña del navegador y no se instala nada.","Para usarla como app: en Chrome o Edge, menú y <b>Instalar</b>; en el celular, <b>Añadir a pantalla de inicio</b>."]))+
-  DET("tv","Smart TV y realidad virtual (LG, Samsung, Android TV, Meta Quest)",UL(["<b>LG TV (.ipk):</b> requiere activar el modo desarrollador y las herramientas de LG para webOS.","<b>Samsung TV (.wgt):</b> requiere modo desarrollador y Tizen Studio.","<b>Android TV (.apk):</b> instálalo con un explorador de archivos (por ejemplo la app «Downloader») o por USB.","<b>Meta Quest (.apk):</b> activa el modo desarrollador y usa SideQuest o Meta Quest Developer Hub.","Son pasos técnicos: sigue la guía oficial de tu dispositivo."]))+
-  DET("mc","Minecraft: mods, plugins y add-ons",UL(["<b>Mods de Java (.jar):</b> instala primero el cargador que indique la app (Forge, Fabric o NeoForge) para <b>la misma versión</b> del juego. Copia el .jar a la carpeta <b>mods</b>: en Windows, pulsa "+K("Win")+" + "+K("R")+", escribe <code>%appdata%\\.minecraft</code> y abre (o crea) la carpeta mods.","<b>Plugins (.jar):</b> son para servidores Spigot, Paper o Bukkit. Copia el .jar a la carpeta <b>plugins</b> del servidor y reinícialo. Solo quien administra el servidor puede hacerlo.","<b>Add-ons de Bedrock (.mcaddon, .mcpack, .mcworld):</b> ábrelo con Minecraft (doble clic en Windows; en el celular, desde Archivos). Se importa solo; luego actívalo en los ajustes de tu mundo."])+TIP("Antes de instalar mods, haz una copia de tus mundos."))],
+  DET("web","Web / HTML5 (botón «Abrir»)",MK.pwa()+UL(["Se abre en una pestaña del navegador y no se instala nada.","Para usarla como app: en Chrome o Edge, menú y <b>Instalar</b>; en el celular, <b>Añadir a pantalla de inicio</b>."]))+
+  DET("tv","Smart TV y realidad virtual (LG, Samsung, Android TV, Meta Quest)",MK.flow()+UL(["<b>LG TV (.ipk):</b> requiere activar el modo desarrollador y las herramientas de LG para webOS.","<b>Samsung TV (.wgt):</b> requiere modo desarrollador y Tizen Studio.","<b>Android TV (.apk):</b> instálalo con un explorador de archivos (por ejemplo la app «Downloader») o por USB.","<b>Meta Quest (.apk):</b> activa el modo desarrollador y usa SideQuest o Meta Quest Developer Hub.","Son pasos técnicos: sigue la guía oficial de tu dispositivo."]))+
+  DET("mc","Minecraft: mods, plugins y add-ons",MK.mc()+UL(["<b>Mods de Java (.jar):</b> instala primero el cargador que indique la app (Forge, Fabric o NeoForge) para <b>la misma versión</b> del juego. Copia el .jar a la carpeta <b>mods</b>: en Windows, pulsa "+K("Win")+" + "+K("R")+", escribe <code>%appdata%\\.minecraft</code> y abre (o crea) la carpeta mods.","<b>Plugins (.jar):</b> son para servidores Spigot, Paper o Bukkit. Copia el .jar a la carpeta <b>plugins</b> del servidor y reinícialo. Solo quien administra el servidor puede hacerlo.","<b>Add-ons de Bedrock (.mcaddon, .mcpack, .mcworld):</b> ábrelo con Minecraft (doble clic en Windows; en el celular, desde Archivos). Se importa solo; luego actívalo en los ajustes de tu mundo."])+TIP("Antes de instalar mods, haz una copia de tus mundos."))],
  ["clock","Próximos estrenos","Algunas apps se anuncian antes de salir:",
   UL(["Llevan la etiqueta <b>Próximamente</b> y una <b>cuenta regresiva</b> en días, horas, minutos y segundos.","El botón dice «Disponible el…» y no se puede pulsar hasta ese momento.","Cuando llega la hora, la app se activa sola y la página se actualiza.","Para verlas todas juntas, elige <b>Próximos estrenos</b> en el orden del catálogo."])],
  ["megaphone","Novedades y spoilers","En la pestaña Novedades publico noticias del proyecto.",
@@ -420,7 +474,7 @@ const TOUR=[
   `<div class="tgo"><button class="sec" data-act="gotab" data-tab="dl">Ir a Descargas</button><button class="sec" data-act="gotab" data-tab="su">Ir a Sugerencias</button></div>`]
 ];
 const IOSSTEP=["share",IOS?"Instala en tu iPhone o iPad":"Si usas iPhone o iPad","En iPhone y iPad las apps se instalan como PWA: se ven y funcionan como una app normal, sin pasar por la App Store.",
- OL(["Abre este sitio en <b>Safari</b>.","Toca el botón <b>Compartir</b> "+ic("share",18)+" (en iPhone está abajo; en iPad, arriba a la derecha).","Desliza el menú y elige <b>Añadir a pantalla de inicio</b> "+ic("addhome",18)+".","Toca <b>Añadir</b>. Verás el icono en tu pantalla de inicio y se abrirá a pantalla completa, como una app."])+TIP("Los archivos .apk y .exe no funcionan en iOS: usa los botones <b>Abrir PWA</b> de cada app. Si no ves «Añadir a pantalla de inicio», confirma que estás en Safari y no dentro de otra app (Instagram, Facebook…)."),"ios"];
+ MK.ios()+OL(["Abre este sitio en <b>Safari</b>.","Toca el botón <b>Compartir</b> "+ic("share",18)+" (en iPhone está abajo; en iPad, arriba a la derecha).","Desliza el menú y elige <b>Añadir a pantalla de inicio</b> "+ic("addhome",18)+".","Toca <b>Añadir</b>. Verás el icono en tu pantalla de inicio y se abrirá a pantalla completa, como una app."])+TIP("Los archivos .apk y .exe no funcionan en iOS: usa los botones <b>Abrir PWA</b> de cada app. Si no ves «Añadir a pantalla de inicio», confirma que estás en Safari y no dentro de otra app (Instagram, Facebook…)."),"ios"];
 TOUR.splice(IOS?1:TOUR.findIndex(s=>s[1]==="Instalar según tu dispositivo")+1,0,IOSSTEP);
 let ti=0;
 $("tIdx").innerHTML=TOUR.map((s,k)=>`<option value="${k}">${k+1}. ${esc(s[1])}</option>`).join("");
@@ -458,7 +512,7 @@ function firstVisit(){initIosTip();
 let vItems=[],vi=0;
 async function openView(id){
   const a=apps.find(x=>x.id===id);if(!a)return;
-  $("vIcon").innerHTML=a.icon?`<img class="ico" src="${esc(a.icon)}" alt="">`:`<div class="ico">${ic("box",30)}</div>`;
+  $("vIcon").innerHTML=a.icon?`<img class="ico" src="${esc(a.icon)}" alt="" decoding="async">`:`<div class="ico">${ic("box",30)}</div>`;
   $("vName").textContent=a.name;$("vMeta").textContent=(a.saga?a.saga+" · ":"")+"v"+a.ver+" · "+a.cat+" · "+a.dev;
   $("vDesc").innerHTML=esc(a.desc)+(a.notes?`<div class="mut" style="margin-top:8px">Novedades: ${esc(a.notes)}</div>`:"");
   const card=[...document.querySelectorAll(".card[data-id]")].find(c=>c.dataset.id===id);$("vLinks").innerHTML=card?card.querySelector(".links").innerHTML:"";
@@ -736,21 +790,45 @@ setInterval(()=>{document.querySelectorAll(".cd").forEach(e=>{
   const d=Math.floor(t/864e5),h=Math.floor(t%864e5/36e5),m=Math.floor(t%36e5/6e4),s=Math.floor(t%6e4/1e3);
   e.innerHTML=`<span><b>${d}</b>días</span><span><b>${h}</b>horas</span><span><b>${m}</b>min</span><span><b>${s}</b>seg</span>`})},1000);
 
-/* ---------- Efectos: tilt 3D, resplandor, partículas ---------- */
-$("grid").addEventListener("pointermove",e=>{const c=e.target.closest(".card");if(!c)return;const r=c.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;c.style.setProperty("--ry",(x-.5)*10+"deg");c.style.setProperty("--rx",(.5-y)*10+"deg");c.style.setProperty("--mx",x*100+"%");c.style.setProperty("--my",y*100+"%")});
+/* ---------- Efectos: tilt 3D, resplandor y partículas (según dispositivo) ---------- */
+let mx=innerWidth/2,my=innerHeight/3,tiltRaf=0,tiltEv=null,glowRaf=0;
+const tiltOn=()=>fxLevel==="full"&&HOVQ.matches&&!RMQ.matches;
+$("grid").addEventListener("pointermove",e=>{
+  if(!tiltOn())return;tiltEv=e;if(tiltRaf)return;
+  tiltRaf=requestAnimationFrame(()=>{tiltRaf=0;const ev=tiltEv,c=ev.target.closest&&ev.target.closest(".card");if(!c)return;
+    const r=c.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width,y=(ev.clientY-r.top)/r.height;
+    c.style.setProperty("--ry",(x-.5)*10+"deg");c.style.setProperty("--rx",(.5-y)*10+"deg");c.style.setProperty("--mx",x*100+"%");c.style.setProperty("--my",y*100+"%")});
+},{passive:true});
 $("grid").addEventListener("pointerout",e=>{const c=e.target.closest(".card");if(c){c.style.setProperty("--rx","0deg");c.style.setProperty("--ry","0deg")}});
-let mx=innerWidth/2,my=innerHeight/3;
-addEventListener("pointermove",e=>{mx=e.clientX;my=e.clientY;$("glow").style.left=mx+"px";$("glow").style.top=my+"px"});
-(()=>{const cv=$("fx"),g=cv.getContext("2d");let W,H,P=[];
-  const size=()=>{W=cv.width=innerWidth;H=cv.height=innerHeight;P=Array.from({length:Math.min(90,Math.floor(W*H/16000))},()=>({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35}))};
-  size();addEventListener("resize",size);
-  (function loop(){g.clearRect(0,0,W,H);
+addEventListener("pointermove",e=>{
+  mx=e.clientX;my=e.clientY;if(fxLevel!=="full"||!HOVQ.matches||glowRaf)return;
+  glowRaf=requestAnimationFrame(()=>{glowRaf=0;$("glow").style.left=mx+"px";$("glow").style.top=my+"px"});
+},{passive:true});
+fxRestart=(()=>{
+  const cv=$("fx"),g=cv.getContext("2d");let W=0,H=0,P=[],raf=0,tm=0,link=120;
+  const cfg=()=>fxLevel==="full"?{n:90,dpr:Math.min(window.devicePixelRatio||1,1.5),link:120}:fxLevel==="mid"?{n:34,dpr:1,link:100}:{n:0,dpr:1,link:0};
+  function size(){
+    const c=cfg();link=c.link;if(!c.n||RMQ.matches){P=[];g.clearRect(0,0,cv.width||1,cv.height||1);return}
+    W=innerWidth;H=innerHeight;cv.width=Math.round(W*c.dpr);cv.height=Math.round(H*c.dpr);cv.style.width=W+"px";cv.style.height=H+"px";g.setTransform(c.dpr,0,0,c.dpr,0,0);
+    P=Array.from({length:Math.min(c.n,Math.floor(W*H/16000))},()=>({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35}));
+  }
+  function draw(){
+    g.clearRect(0,0,W,H);g.fillStyle="#00e5ffaa";
     for(const p of P){p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
-      const dx=mx-p.x,dy=my-p.y,d=Math.hypot(dx,dy);if(d<160){p.x+=dx*.004;p.y+=dy*.004}
-      g.fillStyle="#00e5ffaa";g.beginPath();g.arc(p.x,p.y,1.4,0,7);g.fill()}
-    for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){const d=Math.hypot(P[i].x-P[j].x,P[i].y-P[j].y);if(d<120){g.strokeStyle=`rgba(138,92,255,${.35*(1-d/120)})`;g.beginPath();g.moveTo(P[i].x,P[i].y);g.lineTo(P[j].x,P[j].y);g.stroke()}}
-    requestAnimationFrame(loop)})();
+      const dx=mx-p.x,dy=my-p.y;if(dx*dx+dy*dy<25600){p.x+=dx*.004;p.y+=dy*.004}
+      g.beginPath();g.arc(p.x,p.y,1.4,0,7);g.fill()}
+    const L2=link*link;
+    for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){const dx=P[i].x-P[j].x,dy=P[i].y-P[j].y,d2=dx*dx+dy*dy;
+      if(d2<L2){g.strokeStyle=`rgba(138,92,255,${.35*(1-Math.sqrt(d2)/link)})`;g.beginPath();g.moveTo(P[i].x,P[i].y);g.lineTo(P[j].x,P[j].y);g.stroke()}}
+  }
+  function loop(){
+    raf=0;tm=0;if(!P.length)return;
+    if(document.hidden||document.querySelector("dialog[open]")){tm=setTimeout(loop,500);return}
+    draw();raf=requestAnimationFrame(loop);
+  }
+  return ()=>{cancelAnimationFrame(raf);clearTimeout(tm);size();if(P.length)loop()};
 })();
+fxRestart();perfProbe();
 /* ---------- Documentos legales ---------- */
 const EMP={mail:"tech.studios270@gmail.com"},UPD="15 de octubre de 2026";
 const WHO=`<p><b>Titular del sitio:</b> Tech Studios (contacto: ${EMP.mail}), en adelante «Tech Studios».</p>`;
@@ -799,7 +877,7 @@ eula:["Acuerdo de Licencia de Usuario Final (EULA)",()=>WHO+`
 <h3>9. Ley aplicable</h3><p>Rige la ley chilena y la jurisdicción indicada en el Acuerdo Legal.</p>`],
 cookies:["Política de Cookies y Almacenamiento Local",()=>WHO+`
 <h3>1. Qué usamos</h3><p>Por defecto este sitio no usa cookies de seguimiento ni publicidad. Emplea almacenamiento local del navegador (localStorage y sessionStorage) necesario para su funcionamiento y, solo si lo aceptas, cookies de analítica:</p>
-<ul><li><b>Preferencias:</b> estilo visual elegido (Neón o Liquid Glass), tu decisión sobre las cookies de analítica si ya viste el tutorial de bienvenida, si cerraste el aviso de instalación en iOS y si ya respondiste el cuestionario.</li><li><b>Cookies de analítica (opcionales):</b> si las aceptas, Google Analytics 4 (Google LLC) instala cookies como «_ga» y «_ga_…» para distinguir visitantes y medir el uso del sitio (páginas vistas, descargas, país aproximado, tipo de dispositivo). Google indica que pueden durar hasta 2 años. No usamos funciones publicitarias. Puedes rechazarlas o retirarlas cuando quieras desde «Preferencias de cookies», en el pie de página.</li><li><b>Sesión del administrador:</b> token de sesión temporal (sessionStorage) que caduca en minutos. El catálogo y los contadores de descargas se guardan en el servidor, no en tu navegador.</li></ul>
+<ul><li><b>Preferencias:</b> estilo visual elegido (Neón o Liquid Glass), el nivel de efectos visuales, tu decisión sobre las cookies de analítica si ya viste el tutorial de bienvenida, si cerraste el aviso de instalación en iOS y si ya respondiste el cuestionario.</li><li><b>Cookies de analítica (opcionales):</b> si las aceptas, Google Analytics 4 (Google LLC) instala cookies como «_ga» y «_ga_…» para distinguir visitantes y medir el uso del sitio (páginas vistas, descargas, país aproximado, tipo de dispositivo). Google indica que pueden durar hasta 2 años. No usamos funciones publicitarias. Puedes rechazarlas o retirarlas cuando quieras desde «Preferencias de cookies», en el pie de página.</li><li><b>Sesión del administrador:</b> token de sesión temporal (sessionStorage) que caduca en minutos. El catálogo y los contadores de descargas se guardan en el servidor, no en tu navegador.</li></ul>
 <h3>2. Terceros</h3><p>Solo si aceptas la analítica cargamos el script de Google Analytics (Google LLC), que puede tratar datos de tu navegador y transferirlos fuera de Chile, incluyendo Estados Unidos. Solo si pulsas «Ver tráiler» en un video de YouTube cargamos su reproductor (Google LLC, youtube-nocookie.com). Las imágenes, videos y archivos de las apps se sirven desde nuestros proveedores de almacenamiento. No cargamos otros scripts ni fuentes de terceros. Además, el proveedor de alojamiento puede registrar datos técnicos de conexión (ver Política de Privacidad).</p>
 <h3>3. Control</h3><p>Puedes retirar tu consentimiento en cualquier momento desde «Preferencias de cookies» y borrar estos datos desde la configuración de tu navegador. Hacerlo restablece tus preferencias. Su tratamiento se rige por la Ley N° 19.628 y la Ley N° 21.719.</p>`],
 propiedad:["Propiedad Intelectual y Retiro de Contenido",()=>WHO+`
@@ -817,7 +895,7 @@ function openLegal(k){const d=LD[k];if(!d)return;$("lgBody").innerHTML=`<h2>${d[
 dLegal.onclose=()=>{try{history.replaceState(null,"",location.pathname)}catch(e){}};
 document.addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;if(b.tagName==="A")e.preventDefault();
   if(a==="close")$(b.dataset.d).close();else if(a==="legal")openLegal(b.dataset.k);
-  else if(a==="edit")window.editApp(b.dataset.id);else if(a==="del")window.delApp(b.dataset.id);else if(a==="q")window.togQ(b.dataset.id);else if(a==="tour")openTour();else if(a==="gotab"){dTour.close();setTab(b.dataset.tab)}else if(a==="consent")showConsent();else if(a==="spoil")b.closest(".spoil").classList.add("open");else if(a==="pedit")editPost(b.dataset.id);else if(a==="pdel")delPost(b.dataset.id)});
+  else if(a==="edit")window.editApp(b.dataset.id);else if(a==="del")window.delApp(b.dataset.id);else if(a==="q")window.togQ(b.dataset.id);else if(a==="tour")openTour();else if(a==="fx")cycleFx();else if(a==="gotab"){dTour.close();setTab(b.dataset.tab)}else if(a==="consent")showConsent();else if(a==="spoil")b.closest(".spoil").classList.add("open");else if(a==="pedit")editPost(b.dataset.id);else if(a==="pdel")delPost(b.dataset.id)});
 if(LD[location.hash.slice(1)])openLegal(location.hash.slice(1));
 
 const setLiquid=v=>{document.body.classList.toggle("liquid",v);document.documentElement.classList.toggle("lq",v);$("bStyle").innerHTML=v?ic("palette",16)+" Neón":ic("drop",16)+" Liquid Glass";try{localStorage.setItem("ts_style",v?"liquid":"neon")}catch(e){}};
